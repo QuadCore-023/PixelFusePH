@@ -6,15 +6,16 @@ const prisma = new PrismaClient();
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const query = searchParams.get('email'); // can be email or phone
+    const query = searchParams.get('email')?.trim(); // can be email, phone, or order ID
 
     let orders;
     if (query) {
       orders = await prisma.order.findMany({
         where: { 
           OR: [
-            { customerEmail: query },
-            { customerPhone: query }
+            { customerEmail: { equals: query, mode: 'insensitive' } },
+            { customerPhone: query },
+            { id: { startsWith: query } }
           ]
         },
         orderBy: { createdAt: 'desc' }
@@ -119,6 +120,27 @@ export async function PUT(request: Request) {
     return NextResponse.json(order);
   } catch (error: any) {
     console.error("Failed to update order:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+
+    if (!id) {
+      return NextResponse.json({ error: 'Order ID is required' }, { status: 400 });
+    }
+
+    await prisma.order.delete({
+      where: { id },
+    });
+
+    return NextResponse.json({ message: 'Order deleted successfully' }, { status: 200 });
+  } catch (error: any) {
+    console.error("Failed to delete order:", error);
     const errorMessage = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
