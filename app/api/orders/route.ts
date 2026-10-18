@@ -81,6 +81,9 @@ export async function POST(request: Request) {
       }
     }
 
+    const validStatuses = ['Pending', 'Accepted', 'Shipping', 'Done', 'Declined'];
+    const orderStatus = validStatuses.includes(body.status) ? body.status : 'Pending';
+
     const order = await prisma.order.create({
       data: {
         customerName,
@@ -94,7 +97,7 @@ export async function POST(request: Request) {
         totalAmount,
         paymentMethod,
         proofOfPayment,
-        status: 'Pending',
+        status: orderStatus,
       },
     });
     

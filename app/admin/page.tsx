@@ -26,6 +26,15 @@ import {
   CheckCircle2,
   Truck,
   XCircle,
+  BarChart3,
+  TrendingUp,
+  Download,
+  Plus,
+  Minus,
+  Store,
+  Calendar,
+  CreditCard,
+  Award,
 } from "lucide-react";
 
 const AVAILABLE_RIBBONS = [
@@ -40,7 +49,7 @@ export default function AdminDashboard() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loginUsername, setLoginUsername] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
-  const [activeTab, setActiveTab] = useState<"products" | "orders" | "account" | "categories" | "website">("products");
+  const [activeTab, setActiveTab] = useState<"products" | "orders" | "sales" | "account" | "categories" | "website">("products");
   
   // Data states
   const [products, setProducts] = useState<any[]>([]);
@@ -74,6 +83,25 @@ export default function AdminDashboard() {
   const [copiedOrderId, setCopiedOrderId] = useState<string | null>(null);
   const [previewModal, setPreviewModal] = useState<{ url: string; title: string } | null>(null);
   const [confirmDeleteOrderId, setConfirmDeleteOrderId] = useState<string | null>(null);
+
+  // Sales & Analytics states
+  const [salesPeriod, setSalesPeriod] = useState<"today" | "7days" | "30days" | "month" | "all" | "custom">("all");
+  const [salesCustomStart, setSalesCustomStart] = useState<string>("");
+  const [salesCustomEnd, setSalesCustomEnd] = useState<string>("");
+  const [salesBasis, setSalesBasis] = useState<"fulfilled" | "done_only" | "all_active">("fulfilled");
+
+  // Quick Walk-in POS states
+  const [showPosModal, setShowPosModal] = useState<boolean>(false);
+  const [posCart, setPosCart] = useState<Array<{ id: string; name: string; price: number; quantity: number; image?: string }>>([]);
+  const [posSearch, setPosSearch] = useState<string>("");
+  const [posCustomerName, setPosCustomerName] = useState<string>("Walk-in Customer");
+  const [posPaymentMethod, setPosPaymentMethod] = useState<"cash" | "gcash" | "maya">("cash");
+  const [posLocationNote, setPosLocationNote] = useState<string>("Walk-in / Booth POS");
+  const [posDiscount, setPosDiscount] = useState<string>("");
+  const [posCashReceived, setPosCashReceived] = useState<string>("");
+  const [posCustomName, setPosCustomName] = useState<string>("");
+  const [posCustomPrice, setPosCustomPrice] = useState<string>("");
+  const [isSubmittingPos, setIsSubmittingPos] = useState<boolean>(false);
 
   // Product Form states
   const [newProduct, setNewProduct] = useState({
@@ -580,6 +608,376 @@ export default function AdminDashboard() {
     }
   };
 
+  // --- Sales & Analytics Calculations ---
+  const isPosOrder = (o: any) => {
+    const addr = (o.address || "").toLowerCase();
+    return (
+      o.customerEmail === "walkin@pixelfuse.pos" ||
+      addr.includes("walk-in") ||
+      addr.includes("pos") ||
+      addr.includes("booth")
+    );
+  };
+
+  const ordersInPeriod = orders.filter((o) => {
+    if (!o.createdAt) return true;
+    const orderDate = new Date(o.createdAt);
+    const now = new Date();
+
+    if (salesPeriod === "today") {
+      return (
+        orderDate.getFullYear() === now.getFullYear() &&
+        orderDate.getMonth() === now.getMonth() &&
+        orderDate.getDate() === now.getDate()
+      );
+    }
+    if (salesPeriod === "7days") {
+      const cutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      return orderDate >= cutoff;
+    }
+    if (salesPeriod === "30days") {
+      const cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      return orderDate >= cutoff;
+    }
+    if (salesPeriod === "month") {
+      return (
+        orderDate.getFullYear() === now.getFullYear() &&
+        orderDate.getMonth() === now.getMonth()
+      );
+    }
+    if (salesPeriod === "custom") {
+      if (salesCustomStart) {
+        const start = new Date(`${salesCustomStart}T00:00:00`);
+        if (orderDate < start) return false;
+      }
+      if (salesCustomEnd) {
+        const end = new Date(`${salesCustomEnd}T23:59:59.999`);
+        if (orderDate > end) return false;
+      }
+      return true;
+    }
+    return true; // "all"
+  });
+
+  const qualifyingSalesOrders = ordersInPeriod.filter((o) => {
+    if (salesBasis === "done_only") return o.status === "Done";
+    if (salesBasis === "all_active") return o.status !== "Declined";
+    return o.status === "Done" || o.status === "Shipping"; // "fulfilled"
+  });
+
+  const periodGrossRevenue = qualifyingSalesOrders.reduce(
+    (sum, o) => sum + (Number(o.totalAmount) || 0),
+    0
+  );
+  const periodDeliveryFees = qualifyingSalesOrders.reduce(
+    (sum, o) => sum + (Number(o.deliveryFee) || 0),
+    0
+  );
+  const periodNetItemRevenue = Math.max(0, periodGrossRevenue - periodDeliveryFees);
+  const periodAvgOrderValue =
+    qualifyingSalesOrders.length > 0
+      ? Math.round(periodGrossRevenue / qualifyingSalesOrders.length)
+      : 0;
+  const periodPendingPipeline = ordersInPeriod
+    .filter((o) => o.status === "Pending" || o.status === "Accepted")
+    .reduce((sum, o) => sum + (Number(o.totalAmount) || 0), 0);
+
+  // Aggregate Top Selling Products & Total Units Sold
+  const productSalesMap: Record<
+    string,
+    { key: string; name: string; image: string; units: number; revenue: number; ordersCount: number }
+  > = {};
+  let periodUnitsSold = 0;
+
+  qualifyingSalesOrders.forEach((o) => {
+    let parsedItems: any[] = [];
+    try {
+      parsedItems = typeof o.items === "string" ? JSON.parse(o.items) : o.items || [];
+    } catch {
+      parsedItems = [];
+    }
+    if (!Array.isArray(parsedItems)) return;
+
+    parsedItems.forEach((item) => {
+      const qty = Number(item.quantity) || 1;
+      const price = Number(item.price) || 0;
+      const itemRev = qty * price;
+      periodUnitsSold += qty;
+
+      const key = String(item.id || item.name || "unknown");
+      if (!productSalesMap[key]) {
+        productSalesMap[key] = {
+          key,
+          name: item.name || "Unnamed Item",
+          image: item.image || "",
+          units: 0,
+          revenue: 0,
+          ordersCount: 0,
+        };
+      }
+      productSalesMap[key].units += qty;
+      productSalesMap[key].revenue += itemRev;
+      productSalesMap[key].ordersCount += 1;
+    });
+  });
+
+  const topSellingProducts = Object.values(productSalesMap).sort((a, b) => {
+    if (b.units !== a.units) return b.units - a.units;
+    return b.revenue - a.revenue;
+  });
+
+  // Payment Method Breakdown
+  const paymentBreakdown = ["cash", "gcash", "maya"].map((method) => {
+    const matching = qualifyingSalesOrders.filter(
+      (o) => (o.paymentMethod || "cash").toLowerCase() === method
+    );
+    const total = matching.reduce((s, o) => s + (Number(o.totalAmount) || 0), 0);
+    const pct = periodGrossRevenue > 0 ? Math.round((total / periodGrossRevenue) * 100) : 0;
+    return {
+      method,
+      label: method === "cash" ? "Cash" : method === "gcash" ? "GCash" : "Maya",
+      count: matching.length,
+      total,
+      pct,
+    };
+  });
+
+  // Channel Breakdown (Walk-in POS vs Meetup vs Delivery)
+  const channelBreakdown = [
+    {
+      id: "pos",
+      label: "Walk-in / Booth POS",
+      orders: qualifyingSalesOrders.filter((o) => isPosOrder(o)),
+      color: "bg-emerald-500",
+    },
+    {
+      id: "meetup",
+      label: "Campus Meetup",
+      orders: qualifyingSalesOrders.filter((o) => !isPosOrder(o) && (Number(o.deliveryFee) || 0) === 0),
+      color: "bg-purple-500",
+    },
+    {
+      id: "delivery",
+      label: "Delivery (Taguig / Makati)",
+      orders: qualifyingSalesOrders.filter((o) => !isPosOrder(o) && (Number(o.deliveryFee) || 0) > 0),
+      color: "bg-blue-500",
+    },
+  ].map((ch) => {
+    const total = ch.orders.reduce((s, o) => s + (Number(o.totalAmount) || 0), 0);
+    const pct = periodGrossRevenue > 0 ? Math.round((total / periodGrossRevenue) * 100) : 0;
+    return { ...ch, count: ch.orders.length, total, pct };
+  });
+
+  // Daily Sales Trend (up to last 14 active dates)
+  const dailyMap: Record<string, { dateKey: string; label: string; revenue: number; count: number }> = {};
+  qualifyingSalesOrders.forEach((o) => {
+    const d = new Date(o.createdAt);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    const dateKey = `${yyyy}-${mm}-${dd}`;
+    const label = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    if (!dailyMap[dateKey]) {
+      dailyMap[dateKey] = { dateKey, label, revenue: 0, count: 0 };
+    }
+    dailyMap[dateKey].revenue += Number(o.totalAmount) || 0;
+    dailyMap[dateKey].count += 1;
+  });
+  const dailyTrend = Object.values(dailyMap)
+    .sort((a, b) => a.dateKey.localeCompare(b.dateKey))
+    .slice(-14);
+  const maxDailyRevenue = Math.max(1, ...dailyTrend.map((d) => d.revenue));
+
+  // CSV Export Handler
+  const handleExportSalesCsv = () => {
+    if (qualifyingSalesOrders.length === 0) {
+      alert("No sales records in the selected period to export.");
+      return;
+    }
+    const headers = [
+      "Order ID",
+      "Date",
+      "Customer Name",
+      "Customer Email",
+      "Customer Phone",
+      "Channel",
+      "Location / Address",
+      "Payment Method",
+      "Status",
+      "Items Ordered",
+      "Total Units",
+      "Subtotal (PHP)",
+      "Delivery Fee (PHP)",
+      "Total Amount (PHP)",
+    ];
+
+    const escapeCsv = (val: any) => {
+      const str = String(val ?? "").replace(/"/g, '""');
+      return `"${str}"`;
+    };
+
+    const rows = qualifyingSalesOrders.map((o) => {
+      let itemsList: any[] = [];
+      try {
+        itemsList = typeof o.items === "string" ? JSON.parse(o.items) : o.items || [];
+      } catch {
+        itemsList = [];
+      }
+      const itemsSummary = itemsList
+        .map((i: any) => `${i.quantity || 1}x ${i.name} (P${i.price})`)
+        .join("; ");
+      const units = itemsList.reduce((acc: number, i: any) => acc + (Number(i.quantity) || 1), 0);
+      const total = Number(o.totalAmount) || 0;
+      const deliv = Number(o.deliveryFee) || 0;
+      const sub = Math.max(0, total - deliv);
+      const channel = isPosOrder(o)
+        ? "Walk-in POS"
+        : deliv > 0
+        ? "Delivery"
+        : "Campus Meetup";
+
+      return [
+        o.id,
+        new Date(o.createdAt).toLocaleString(),
+        o.customerName,
+        o.customerEmail,
+        o.customerPhone || "",
+        channel,
+        o.address || "",
+        (o.paymentMethod || "cash").toUpperCase(),
+        o.status,
+        itemsSummary,
+        units,
+        sub,
+        deliv,
+        total,
+      ]
+        .map(escapeCsv)
+        .join(",");
+    });
+
+    const csvContent = "\uFEFF" + [headers.map(escapeCsv).join(","), ...rows].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const todayStr = new Date().toISOString().slice(0, 10);
+    link.href = url;
+    link.setAttribute("download", `pixelfuse-sales-report-${todayStr}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // --- Quick Walk-in POS Handlers ---
+  const addToPosCart = (product: any) => {
+    const hasSale =
+      product.salePrice !== null &&
+      product.salePrice !== undefined &&
+      Number(product.salePrice) > 0 &&
+      Number(product.salePrice) < Number(product.price);
+    const effectivePrice = hasSale ? Number(product.salePrice) : Number(product.price);
+
+    setPosCart((prev) => {
+      const existing = prev.find((i) => i.id === product.id);
+      if (existing) {
+        return prev.map((i) => (i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i));
+      }
+      return [
+        ...prev,
+        {
+          id: product.id,
+          name: product.name,
+          price: effectivePrice,
+          quantity: 1,
+          image: product.image || "",
+        },
+      ];
+    });
+  };
+
+  const updatePosQty = (id: string, delta: number) => {
+    setPosCart((prev) =>
+      prev
+        .map((i) => (i.id === id ? { ...i, quantity: i.quantity + delta } : i))
+        .filter((i) => i.quantity > 0)
+    );
+  };
+
+  const handleAddPosCustomItem = () => {
+    const trimmedName = posCustomName.trim();
+    const priceNum = Number(posCustomPrice);
+    if (!trimmedName || isNaN(priceNum) || priceNum <= 0) {
+      alert("Please enter a valid custom item name and price.");
+      return;
+    }
+    setPosCart((prev) => [
+      ...prev,
+      {
+        id: `custom-pos-${Date.now()}`,
+        name: trimmedName,
+        price: priceNum,
+        quantity: 1,
+      },
+    ]);
+    setPosCustomName("");
+    setPosCustomPrice("");
+  };
+
+  const posSubtotal = posCart.reduce((s, i) => s + i.price * i.quantity, 0);
+  const posDiscountNum = Math.max(0, Number(posDiscount) || 0);
+  const posFinalTotal = Math.max(0, posSubtotal - posDiscountNum);
+  const posCashReceivedNum = Number(posCashReceived) || 0;
+  const posChangeDue = Math.max(0, posCashReceivedNum - posFinalTotal);
+
+  const handleCompletePosSale = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (posCart.length === 0) {
+      alert("Please add at least one item to the walk-in POS ticket.");
+      return;
+    }
+    setIsSubmittingPos(true);
+    try {
+      const payload = {
+        customerName: posCustomerName.trim() || "Walk-in Customer",
+        customerEmail: "walkin@pixelfuse.pos",
+        customerPhone: "Walk-in POS",
+        facebookName: "Walk-in POS",
+        facebookUrl: "",
+        address: posLocationNote.trim() || "Walk-in / Booth POS",
+        deliveryFee: 0,
+        items: posCart,
+        totalAmount: posFinalTotal,
+        paymentMethod: posPaymentMethod,
+        proofOfPayment: null,
+        status: "Done",
+      };
+
+      const res = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        setPosCart([]);
+        setPosCustomerName("Walk-in Customer");
+        setPosDiscount("");
+        setPosCashReceived("");
+        setShowPosModal(false);
+        fetchOrders();
+        fetchProducts();
+      } else {
+        alert("Failed to record walk-in sale.");
+      }
+    } catch (err) {
+      console.error("POS Sale error:", err);
+      alert("Error recording walk-in sale.");
+    } finally {
+      setIsSubmittingPos(false);
+    }
+  };
+
   if (!isAuthenticated) {
     return (
       <div className="max-w-md mx-auto mt-32 mb-32 p-8 bg-gray-800 rounded-xl shadow-2xl border border-gray-700 text-center">
@@ -621,24 +1019,24 @@ export default function AdminDashboard() {
       {/* Admin Navbar */}
       <nav className="bg-gray-900 border-b border-gray-800 text-white sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16 items-center">
-            <div className="flex items-center space-x-2">
+          <div className="flex justify-between h-16 items-center gap-4">
+            <div className="flex items-center space-x-2 shrink-0">
               <span className="text-xl font-bold tracking-tight text-purple-400">Admin Panel</span>
             </div>
             
-            <div className="hidden md:flex items-center space-x-2">
+            <div className="flex items-center space-x-1.5 overflow-x-auto py-2 no-scrollbar">
               <button
                 onClick={() => setActiveTab("products")}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2 ${
+                className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-colors flex items-center space-x-2 shrink-0 ${
                   activeTab === "products" ? "bg-gray-800 text-purple-400" : "text-gray-400 hover:text-white"
                 }`}
               >
                 <Package className="w-4 h-4" />
-                <span>Product Manager</span>
+                <span>Products</span>
               </button>
               <button
                 onClick={() => setActiveTab("orders")}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2 ${
+                className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-colors flex items-center space-x-2 shrink-0 ${
                   activeTab === "orders" ? "bg-gray-800 text-purple-400" : "text-gray-400 hover:text-white"
                 }`}
               >
@@ -651,8 +1049,17 @@ export default function AdminDashboard() {
                 )}
               </button>
               <button
+                onClick={() => setActiveTab("sales")}
+                className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-colors flex items-center space-x-2 shrink-0 ${
+                  activeTab === "sales" ? "bg-gray-800 text-purple-400" : "text-gray-400 hover:text-white"
+                }`}
+              >
+                <BarChart3 className="w-4 h-4" />
+                <span>Sales &amp; POS</span>
+              </button>
+              <button
                 onClick={() => setActiveTab("categories")}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2 ${
+                className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-colors flex items-center space-x-2 shrink-0 ${
                   activeTab === "categories" ? "bg-gray-800 text-purple-400" : "text-gray-400 hover:text-white"
                 }`}
               >
@@ -661,29 +1068,29 @@ export default function AdminDashboard() {
               </button>
               <button
                 onClick={() => setActiveTab("website")}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2 ${
+                className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-colors flex items-center space-x-2 shrink-0 ${
                   activeTab === "website" ? "bg-gray-800 text-purple-400" : "text-gray-400 hover:text-white"
                 }`}
               >
                 <Settings className="w-4 h-4" />
-                <span>Manage Website</span>
+                <span>Website</span>
               </button>
               <button
                 onClick={() => setActiveTab("account")}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2 ${
+                className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-colors flex items-center space-x-2 shrink-0 ${
                   activeTab === "account" ? "bg-gray-800 text-purple-400" : "text-gray-400 hover:text-white"
                 }`}
               >
                 <Settings className="w-4 h-4" />
-                <span>Account Manager</span>
+                <span>Account</span>
               </button>
               
-              <div className="pl-4 ml-4 border-l border-gray-700">
+              <div className="pl-3 ml-2 border-l border-gray-700 shrink-0">
                 <button
                   onClick={handleLogout}
-                  className="flex items-center space-x-2 text-red-400 hover:text-red-300 transition-colors"
+                  className="flex items-center space-x-1.5 text-sm text-red-400 hover:text-red-300 transition-colors"
                 >
-                  <LogOut className="w-5 h-5" />
+                  <LogOut className="w-4 h-4" />
                   <span>Logout</span>
                 </button>
               </div>
@@ -1206,13 +1613,23 @@ export default function AdminDashboard() {
                   Track, verify payments, and update order fulfillment status
                 </p>
               </div>
-              <button 
-                onClick={fetchOrders}
-                className="flex items-center justify-center space-x-2 text-gray-300 hover:text-white bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-xl border border-gray-700 transition-colors"
-              >
-                <RefreshCw className={`w-4 h-4 ${isLoadingOrders ? 'animate-spin' : ''}`} />
-                <span>Refresh Orders</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setShowPosModal(true)}
+                  className="flex items-center justify-center space-x-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2 rounded-xl shadow-lg shadow-emerald-600/20 transition-colors"
+                >
+                  <Store className="w-4 h-4" />
+                  <span>+ Walk-in / POS Sale</span>
+                </button>
+                <button 
+                  onClick={fetchOrders}
+                  className="flex items-center justify-center space-x-2 text-gray-300 hover:text-white bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-xl border border-gray-700 transition-colors"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isLoadingOrders ? 'animate-spin' : ''}`} />
+                  <span>Refresh Orders</span>
+                </button>
+              </div>
             </div>
 
             {/* Summary KPI Cards */}
@@ -1395,7 +1812,11 @@ export default function AdminDashboard() {
                             })}
                           </span>
 
-                          {o.deliveryFee > 0 ? (
+                          {isPosOrder(o) ? (
+                            <span className="text-xs font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-2.5 py-0.5 rounded-full">
+                              🏪 Walk-in POS
+                            </span>
+                          ) : o.deliveryFee > 0 ? (
                             <span className="text-xs font-semibold bg-purple-500/15 text-purple-300 border border-purple-500/30 px-2.5 py-0.5 rounded-full">
                               🚚 Delivery (₱{o.deliveryFee})
                             </span>
@@ -1678,6 +2099,797 @@ export default function AdminDashboard() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Sales & POS Analytics Tab */}
+        {activeTab === "sales" && (
+          <div className="space-y-6">
+            {/* Header & Action Buttons */}
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+              <div>
+                <h1 className="text-2xl font-extrabold text-white flex items-center gap-2.5">
+                  <BarChart3 className="w-7 h-7 text-purple-400" />
+                  <span>Sales Report &amp; Walk-in POS</span>
+                </h1>
+                <p className="text-sm text-gray-400 mt-0.5">
+                  Monitor total revenue, net product sales, top-selling items, payment methods, and record in-person booth/walk-in sales.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setShowPosModal(true)}
+                  className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-600/20 transition-colors"
+                >
+                  <Store className="w-4 h-4" />
+                  <span>+ Record Walk-in / POS Sale</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportSalesCsv}
+                  className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold px-4 py-2.5 rounded-xl shadow-lg shadow-purple-600/20 transition-colors"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Export CSV Report</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    fetchOrders();
+                    fetchProducts();
+                  }}
+                  className="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white px-3.5 py-2.5 rounded-xl border border-gray-700 transition-colors"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isLoadingOrders ? "animate-spin" : ""}`} />
+                  <span>Refresh</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Period Filter & Revenue Basis Controls */}
+            <div className="bg-gray-800 p-4 rounded-2xl border border-gray-700 shadow-lg space-y-4">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="space-y-1.5">
+                  <span className="text-xs font-bold uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-purple-400" />
+                    Time Period
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { id: "today", label: "Today" },
+                      { id: "7days", label: "Last 7 Days" },
+                      { id: "30days", label: "Last 30 Days" },
+                      { id: "month", label: "This Month" },
+                      { id: "all", label: "All Time" },
+                      { id: "custom", label: "Custom Range" },
+                    ].map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => setSalesPeriod(p.id as any)}
+                        className={`px-3.5 py-1.5 rounded-xl text-xs font-bold border transition-all ${
+                          salesPeriod === p.id
+                            ? "bg-purple-600 text-white border-purple-500 shadow"
+                            : "bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-700 hover:text-white"
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <span className="text-xs font-bold uppercase tracking-wider text-gray-400 block">
+                    Revenue Calculation Basis
+                  </span>
+                  <select
+                    value={salesBasis}
+                    onChange={(e) => setSalesBasis(e.target.value as any)}
+                    className="bg-gray-900 border border-gray-700 rounded-xl px-3.5 py-2 text-xs font-semibold text-white focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer"
+                  >
+                    <option value="fulfilled">Fulfilled Orders (Done + Shipping) — Recommended</option>
+                    <option value="done_only">Completed Only (Done)</option>
+                    <option value="all_active">All Non-Declined (Pending + Accepted + Shipping + Done)</option>
+                  </select>
+                </div>
+              </div>
+
+              {salesPeriod === "custom" && (
+                <div className="pt-3 border-t border-gray-700/70 flex flex-wrap items-center gap-4">
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Start Date</label>
+                    <input
+                      type="date"
+                      value={salesCustomStart}
+                      onChange={(e) => setSalesCustomStart(e.target.value)}
+                      className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">End Date</label>
+                    <input
+                      type="date"
+                      value={salesCustomEnd}
+                      onChange={(e) => setSalesCustomEnd(e.target.value)}
+                      className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+                  {(salesCustomStart || salesCustomEnd) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSalesCustomStart("");
+                        setSalesCustomEnd("");
+                      }}
+                      className="text-xs text-purple-400 hover:underline mt-4"
+                    >
+                      Clear Dates
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Executive KPI Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-gradient-to-br from-purple-900/40 to-gray-800 border border-purple-500/40 rounded-2xl p-5 shadow-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-purple-300">
+                    Total Gross Sales
+                  </span>
+                  <TrendingUp className="w-5 h-5 text-purple-400" />
+                </div>
+                <div className="text-3xl font-extrabold text-white">
+                  ₱{periodGrossRevenue.toLocaleString()}
+                </div>
+                <p className="text-xs text-gray-300 mt-1.5">
+                  Across <span className="text-white font-bold">{qualifyingSalesOrders.length}</span> qualifying orders
+                </p>
+              </div>
+
+              <div className="bg-gray-800 border border-emerald-500/30 rounded-2xl p-5 shadow-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                    Net Item Sales
+                  </span>
+                  <ShoppingBag className="w-5 h-5 text-emerald-400" />
+                </div>
+                <div className="text-3xl font-extrabold text-white">
+                  ₱{periodNetItemRevenue.toLocaleString()}
+                </div>
+                <p className="text-xs text-gray-400 mt-1.5">
+                  <span className="text-emerald-300 font-bold">{periodUnitsSold}</span> items sold · ₱{periodDeliveryFees.toLocaleString()} delivery fees
+                </p>
+              </div>
+
+              <div className="bg-gray-800 border border-blue-500/30 rounded-2xl p-5 shadow-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-blue-400">
+                    Avg. Order Value
+                  </span>
+                  <BarChart3 className="w-5 h-5 text-blue-400" />
+                </div>
+                <div className="text-3xl font-extrabold text-white">
+                  ₱{periodAvgOrderValue.toLocaleString()}
+                </div>
+                <p className="text-xs text-gray-400 mt-1.5">
+                  {ordersInPeriod.length} total orders in period ({ordersInPeriod.filter((o) => o.status === "Declined").length} declined)
+                </p>
+              </div>
+
+              <div className="bg-gray-800 border border-amber-500/30 rounded-2xl p-5 shadow-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-amber-400">
+                    Pending Pipeline
+                  </span>
+                  <Clock className="w-5 h-5 text-amber-400" />
+                </div>
+                <div className="text-3xl font-extrabold text-white">
+                  ₱{periodPendingPipeline.toLocaleString()}
+                </div>
+                <p className="text-xs text-gray-400 mt-1.5">
+                  {ordersInPeriod.filter((o) => o.status === "Pending" || o.status === "Accepted").length} orders awaiting completion
+                </p>
+              </div>
+            </div>
+
+            {/* Middle Row: Daily Revenue Trend + Payment & Channel Breakdown */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Daily Revenue Trend Chart */}
+              <div className="lg:col-span-7 bg-gray-800 rounded-2xl border border-gray-700 p-6 shadow-lg flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h2 className="text-lg font-bold text-white">Daily Revenue Trend</h2>
+                      <p className="text-xs text-gray-400">
+                        Sales performance across recent active order dates
+                      </p>
+                    </div>
+                    <span className="text-xs font-semibold text-purple-400 bg-purple-500/10 border border-purple-500/30 px-2.5 py-1 rounded-lg">
+                      Last {dailyTrend.length} Active Days
+                    </span>
+                  </div>
+
+                  {dailyTrend.length === 0 ? (
+                    <div className="py-12 text-center text-gray-500 text-sm">
+                      No sales data recorded in this period yet.
+                    </div>
+                  ) : (
+                    <div className="space-y-3 mt-4">
+                      {dailyTrend.map((day) => {
+                        const widthPct = Math.max(6, Math.round((day.revenue / maxDailyRevenue) * 100));
+                        return (
+                          <div key={day.dateKey} className="space-y-1">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="font-semibold text-gray-200 w-20">{day.label}</span>
+                              <span className="text-gray-400">{day.count} order{day.count === 1 ? "" : "s"}</span>
+                              <span className="font-extrabold text-purple-300">
+                                ₱{day.revenue.toLocaleString()}
+                              </span>
+                            </div>
+                            <div className="w-full h-2.5 bg-gray-900 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-gradient-to-r from-purple-600 to-emerald-400 rounded-full transition-all duration-300"
+                                style={{ width: `${widthPct}%` }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Payment Methods & Channel Breakdown */}
+              <div className="lg:col-span-5 space-y-6">
+                {/* Payment Method Breakdown */}
+                <div className="bg-gray-800 rounded-2xl border border-gray-700 p-6 shadow-lg">
+                  <div className="flex items-center gap-2 mb-4">
+                    <CreditCard className="w-5 h-5 text-purple-400" />
+                    <h2 className="text-lg font-bold text-white">Sales by Payment Method</h2>
+                  </div>
+                  <div className="space-y-3.5">
+                    {paymentBreakdown.map((pm) => (
+                      <div key={pm.method} className="space-y-1.5">
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="font-bold text-white uppercase flex items-center gap-2">
+                            <span>{pm.label}</span>
+                            <span className="text-gray-400 font-normal">({pm.count} orders)</span>
+                          </span>
+                          <span className="font-extrabold text-purple-300">
+                            ₱{pm.total.toLocaleString()} ({pm.pct}%)
+                          </span>
+                        </div>
+                        <div className="w-full h-2 bg-gray-900 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-purple-500 rounded-full transition-all"
+                            style={{ width: `${pm.pct}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Order Channel Breakdown */}
+                <div className="bg-gray-800 rounded-2xl border border-gray-700 p-6 shadow-lg">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Store className="w-5 h-5 text-emerald-400" />
+                    <h2 className="text-lg font-bold text-white">Sales by Fulfillment Channel</h2>
+                  </div>
+                  <div className="space-y-3.5">
+                    {channelBreakdown.map((ch) => (
+                      <div key={ch.id} className="space-y-1.5">
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="font-bold text-white flex items-center gap-2">
+                            <span>{ch.label}</span>
+                            <span className="text-gray-400 font-normal">({ch.count})</span>
+                          </span>
+                          <span className="font-extrabold text-gray-200">
+                            ₱{ch.total.toLocaleString()} ({ch.pct}%)
+                          </span>
+                        </div>
+                        <div className="w-full h-2 bg-gray-900 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full ${ch.color} rounded-full transition-all`}
+                            style={{ width: `${ch.pct}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Top-Selling Products Leaderboard & Recent Sales Log */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Top Selling Items */}
+              <div className="lg:col-span-6 bg-gray-800 rounded-2xl border border-gray-700 p-6 shadow-lg">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <Award className="w-5 h-5 text-amber-400" />
+                    <h2 className="text-lg font-bold text-white">Top-Selling Items</h2>
+                  </div>
+                  <span className="text-xs text-gray-400">Ranked by units sold</span>
+                </div>
+
+                {topSellingProducts.length === 0 ? (
+                  <p className="text-sm text-gray-500 text-center py-8">
+                    No product sales recorded in this period yet.
+                  </p>
+                ) : (
+                  <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+                    {topSellingProducts.map((item, idx) => {
+                      const sharePct =
+                        periodNetItemRevenue > 0
+                          ? Math.min(100, Math.round((item.revenue / periodNetItemRevenue) * 100))
+                          : 0;
+                      return (
+                        <div
+                          key={item.key}
+                          className="bg-gray-900/70 border border-gray-700/70 rounded-xl p-3 flex items-center gap-3"
+                        >
+                          <div
+                            className={`w-7 h-7 rounded-lg font-extrabold text-xs flex items-center justify-center shrink-0 ${
+                              idx === 0
+                                ? "bg-amber-500 text-gray-950"
+                                : idx === 1
+                                ? "bg-gray-300 text-gray-950"
+                                : idx === 2
+                                ? "bg-amber-700 text-white"
+                                : "bg-gray-800 text-gray-400"
+                            }`}
+                          >
+                            #{idx + 1}
+                          </div>
+
+                          {item.image ? (
+                            <img
+                              src={item.image}
+                              alt={item.name}
+                              className="w-11 h-11 rounded-lg object-cover bg-gray-800 border border-gray-700 shrink-0"
+                            />
+                          ) : (
+                            <div className="w-11 h-11 rounded-lg bg-gray-800 border border-gray-700 flex items-center justify-center text-[10px] text-gray-500 shrink-0">
+                              Item
+                            </div>
+                          )}
+
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm font-bold text-white truncate">{item.name}</p>
+                              <span className="text-sm font-extrabold text-emerald-400 shrink-0">
+                                ₱{item.revenue.toLocaleString()}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between text-xs text-gray-400 mt-0.5">
+                              <span>
+                                <strong className="text-purple-300">{item.units}</strong> sold across{" "}
+                                {item.ordersCount} order{item.ordersCount === 1 ? "" : "s"}
+                              </span>
+                              <span>{sharePct}% of item sales</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Recent Sales Transactions List */}
+              <div className="lg:col-span-6 bg-gray-800 rounded-2xl border border-gray-700 p-6 shadow-lg">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h2 className="text-lg font-bold text-white">Recent Qualifying Sales</h2>
+                    <p className="text-xs text-gray-400">
+                      Showing latest {Math.min(15, qualifyingSalesOrders.length)} of {qualifyingSalesOrders.length} transactions
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("orders")}
+                    className="text-xs text-purple-400 hover:underline font-semibold"
+                  >
+                    View All Orders →
+                  </button>
+                </div>
+
+                {qualifyingSalesOrders.length === 0 ? (
+                  <p className="text-sm text-gray-500 text-center py-8">
+                    No qualifying transactions in this period.
+                  </p>
+                ) : (
+                  <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
+                    {qualifyingSalesOrders.slice(0, 15).map((o) => {
+                      let itemsList: any[] = [];
+                      try {
+                        itemsList = JSON.parse(o.items || "[]");
+                      } catch {
+                        itemsList = [];
+                      }
+                      const totalQty = itemsList.reduce(
+                        (acc, i) => acc + (Number(i.quantity) || 1),
+                        0
+                      );
+                      return (
+                        <div
+                          key={o.id}
+                          className="bg-gray-900/70 border border-gray-700/70 rounded-xl p-3 flex items-center justify-between gap-3"
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-bold text-white truncate">
+                                {o.customerName}
+                              </span>
+                              {isPosOrder(o) && (
+                                <span className="text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+                                  POS
+                                </span>
+                              )}
+                              <span className="text-[10px] uppercase font-bold bg-gray-800 text-gray-300 px-2 py-0.5 rounded border border-gray-700">
+                                {o.paymentMethod}
+                              </span>
+                            </div>
+                            <p className="text-xs text-gray-400 mt-0.5 truncate">
+                              {new Date(o.createdAt).toLocaleDateString(undefined, {
+                                month: "short",
+                                day: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}{" "}
+                              · {totalQty} item{totalQty === 1 ? "" : "s"} (
+                              {itemsList.map((i: any) => `${i.quantity}x ${i.name}`).join(", ")})
+                            </p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="text-sm font-extrabold text-purple-400">
+                              ₱{Number(o.totalAmount).toLocaleString()}
+                            </div>
+                            <span className="text-[10px] text-gray-400">{o.status}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Quick Walk-in / Booth POS Modal */}
+        {showPosModal && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+            onClick={() => setShowPosModal(false)}
+          >
+            <div
+              className="bg-gray-900 border border-gray-700 rounded-2xl max-w-5xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div className="px-6 py-4 bg-gray-800/90 border-b border-gray-700 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                    <Store className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-extrabold text-white">
+                      Quick Walk-in / Booth POS Register
+                    </h2>
+                    <p className="text-xs text-gray-400">
+                      Ring up in-person sales immediately — automatically logs as Completed (&ldquo;Done&rdquo;) in your Sales Report.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowPosModal(false)}
+                  className="text-gray-400 hover:text-white bg-gray-800 p-1.5 rounded-full"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div className="p-6 overflow-y-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
+                {/* Left Column: Product Selector & Custom Item */}
+                <div className="lg:col-span-7 space-y-4">
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={posSearch}
+                      onChange={(e) => setPosSearch(e.target.value)}
+                      placeholder="Search products to tap & add..."
+                      className="w-full bg-gray-800 border border-gray-700 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+
+                  {/* Product Tap Grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-72 overflow-y-auto pr-1">
+                    {products
+                      .filter(
+                        (p) =>
+                          p.isAvailable !== false &&
+                          p.name.toLowerCase().includes(posSearch.toLowerCase())
+                      )
+                      .map((p) => {
+                        const hasSale =
+                          p.salePrice !== null &&
+                          p.salePrice !== undefined &&
+                          Number(p.salePrice) > 0 &&
+                          Number(p.salePrice) < Number(p.price);
+                        const activePrice = hasSale ? Number(p.salePrice) : Number(p.price);
+                        const inCart = posCart.find((i) => i.id === p.id);
+
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => addToPosCart(p)}
+                            className={`text-left p-2.5 rounded-xl border transition-all flex flex-col justify-between relative group ${
+                              inCart
+                                ? "bg-emerald-950/30 border-emerald-500/60"
+                                : "bg-gray-800 border-gray-700 hover:border-purple-500"
+                            }`}
+                          >
+                            {inCart && (
+                              <span className="absolute top-2 right-2 bg-emerald-500 text-gray-950 text-xs font-extrabold px-2 py-0.5 rounded-full shadow">
+                                {inCart.quantity}x
+                              </span>
+                            )}
+                            <div className="flex items-center gap-2.5 mb-2">
+                              {p.image ? (
+                                <img
+                                  src={p.image}
+                                  alt={p.name}
+                                  className="w-10 h-10 rounded-lg object-cover bg-gray-900 shrink-0"
+                                />
+                              ) : (
+                                <div className="w-10 h-10 rounded-lg bg-gray-900 flex items-center justify-center text-[9px] text-gray-500 shrink-0">
+                                  No Img
+                                </div>
+                              )}
+                              <span className="text-xs font-bold text-white line-clamp-2">
+                                {p.name}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between w-full pt-1 border-t border-gray-700/60">
+                              <span className="text-xs font-extrabold text-emerald-400">
+                                ₱{activePrice}
+                              </span>
+                              <span className="text-[10px] text-gray-400 group-hover:text-white">
+                                + Tap to Add
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                  </div>
+
+                  {/* Quick Custom / On-the-spot Item */}
+                  <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-3.5 space-y-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-gray-400 block">
+                      + Add Custom / On-the-Spot Item
+                    </span>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="text"
+                        placeholder="Item description (e.g. Custom Keychain / Bundle)"
+                        value={posCustomName}
+                        onChange={(e) => setPosCustomName(e.target.value)}
+                        className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                      <input
+                        type="number"
+                        placeholder="Price (₱)"
+                        value={posCustomPrice}
+                        onChange={(e) => setPosCustomPrice(e.target.value)}
+                        className="w-full sm:w-28 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddPosCustomItem}
+                        className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors shrink-0"
+                      >
+                        Add Item
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column: POS Ticket & Checkout */}
+                <form
+                  onSubmit={handleCompletePosSale}
+                  className="lg:col-span-5 bg-gray-800 border border-gray-700 rounded-2xl p-5 flex flex-col justify-between space-y-4"
+                >
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-extrabold uppercase tracking-wider text-white">
+                        Current POS Ticket ({posCart.reduce((s, i) => s + i.quantity, 0)} items)
+                      </h3>
+                      {posCart.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setPosCart([])}
+                          className="text-xs text-red-400 hover:underline"
+                        >
+                          Clear Ticket
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Ticket Items */}
+                    {posCart.length === 0 ? (
+                      <div className="py-8 text-center text-xs text-gray-500 bg-gray-900/50 rounded-xl border border-gray-700/60">
+                        Tap products on the left to add them to this walk-in sale.
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                        {posCart.map((item) => (
+                          <div
+                            key={item.id}
+                            className="flex items-center justify-between gap-2 bg-gray-900 px-3 py-2 rounded-xl border border-gray-700"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-bold text-white truncate">{item.name}</p>
+                              <p className="text-[11px] text-gray-400">₱{item.price} each</p>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => updatePosQty(item.id, -1)}
+                                className="p-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300"
+                              >
+                                <Minus className="w-3 h-3" />
+                              </button>
+                              <span className="text-xs font-bold text-white w-5 text-center">
+                                {item.quantity}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => updatePosQty(item.id, 1)}
+                                className="p-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300"
+                              >
+                                <Plus className="w-3 h-3" />
+                              </button>
+                            </div>
+                            <span className="text-xs font-extrabold text-emerald-400 w-14 text-right">
+                              ₱{item.price * item.quantity}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Customer & Payment Fields */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-gray-700">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-gray-400 mb-1">
+                          Buyer Name / Label
+                        </label>
+                        <input
+                          type="text"
+                          value={posCustomerName}
+                          onChange={(e) => setPosCustomerName(e.target.value)}
+                          className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white"
+                          placeholder="Walk-in Customer"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-gray-400 mb-1">
+                          Booth / Channel Note
+                        </label>
+                        <input
+                          type="text"
+                          value={posLocationNote}
+                          onChange={(e) => setPosLocationNote(e.target.value)}
+                          className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white"
+                          placeholder="Walk-in / Booth POS"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-gray-400 mb-1.5">
+                        Payment Method
+                      </label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {(["cash", "gcash", "maya"] as const).map((m) => (
+                          <button
+                            key={m}
+                            type="button"
+                            onClick={() => setPosPaymentMethod(m)}
+                            className={`py-2 rounded-lg text-xs font-bold uppercase border transition-all ${
+                              posPaymentMethod === m
+                                ? "bg-emerald-600 text-white border-emerald-500"
+                                : "bg-gray-900 text-gray-400 border-gray-700 hover:text-white"
+                            }`}
+                          >
+                            {m}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Discount & Cash Change Calculator */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-gray-400 mb-1">
+                          Discount (₱ Optional)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={posDiscount}
+                          onChange={(e) => setPosDiscount(e.target.value)}
+                          placeholder="0"
+                          className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-gray-400 mb-1">
+                          Cash Tendered (₱ Calc)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={posCashReceived}
+                          onChange={(e) => setPosCashReceived(e.target.value)}
+                          placeholder="Optional"
+                          className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Totals & Submit */}
+                  <div className="pt-3 border-t border-gray-700 space-y-2">
+                    <div className="flex justify-between text-xs text-gray-400">
+                      <span>Subtotal</span>
+                      <span>₱{posSubtotal.toLocaleString()}</span>
+                    </div>
+                    {posDiscountNum > 0 && (
+                      <div className="flex justify-between text-xs text-amber-400">
+                        <span>Discount</span>
+                        <span>-₱{posDiscountNum.toLocaleString()}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-lg font-extrabold text-white pt-1 border-t border-gray-700">
+                      <span>Total Due</span>
+                      <span className="text-emerald-400">₱{posFinalTotal.toLocaleString()}</span>
+                    </div>
+                    {posCashReceivedNum > 0 && (
+                      <div className="flex justify-between text-xs font-bold text-purple-300 bg-purple-950/40 px-3 py-1.5 rounded-lg border border-purple-500/30">
+                        <span>Change Due:</span>
+                        <span>
+                          {posCashReceivedNum >= posFinalTotal
+                            ? `₱${posChangeDue.toLocaleString()}`
+                            : `Short by ₱${(posFinalTotal - posCashReceivedNum).toLocaleString()}`}
+                        </span>
+                      </div>
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={isSubmittingPos || posCart.length === 0}
+                      className="w-full mt-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-extrabold py-3 px-6 rounded-xl shadow-lg shadow-emerald-600/20 transition-colors"
+                    >
+                      {isSubmittingPos
+                        ? "Recording Sale..."
+                        : `Complete Walk-in Sale (₱${posFinalTotal.toLocaleString()})`}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
           </div>
         )}
 
