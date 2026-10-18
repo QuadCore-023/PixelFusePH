@@ -16,7 +16,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { name, price, description, image, category } = body;
+    const { name, price, description, image, category, isAvailable } = body;
     
     const product = await prisma.product.create({
       data: {
@@ -25,6 +25,7 @@ export async function POST(request: Request) {
         description,
         image,
         category,
+        isAvailable: isAvailable !== undefined ? Boolean(isAvailable) : true,
       },
     });
     
@@ -38,21 +39,23 @@ export async function POST(request: Request) {
 export async function PUT(request: Request) {
   try {
     const body = await request.json();
-    const { id, name, price, description, image, category } = body;
+    const { id, name, price, description, image, category, isAvailable } = body;
 
     if (!id) {
       return NextResponse.json({ error: 'Product ID is required' }, { status: 400 });
     }
 
+    const updateData: any = {};
+    if (name !== undefined) updateData.name = name;
+    if (price !== undefined) updateData.price = parseFloat(price);
+    if (description !== undefined) updateData.description = description;
+    if (image !== undefined) updateData.image = image;
+    if (category !== undefined) updateData.category = category;
+    if (isAvailable !== undefined) updateData.isAvailable = Boolean(isAvailable);
+
     const product = await prisma.product.update({
       where: { id },
-      data: {
-        name,
-        price: parseFloat(price),
-        description,
-        image,
-        category,
-      },
+      data: updateData,
     });
 
     return NextResponse.json(product, { status: 200 });

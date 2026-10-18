@@ -15,6 +15,7 @@ model Product {
   description String
   image       String
   category    String
+  isAvailable Boolean  @default(true)
 }
 
 model Category {

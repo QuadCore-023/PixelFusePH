@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { LogOut, RefreshCw, Settings, Package, ShoppingBag } from "lucide-react";
+import { LogOut, RefreshCw, Settings, Package, ShoppingBag, Search, Filter, ArrowUpDown, Trash2 } from "lucide-react";
 
 export default function AdminDashboard() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -25,6 +25,12 @@ export default function AdminDashboard() {
 
   // Product Form states
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [confirmDeleteProduct, setConfirmDeleteProduct] = useState(false);
+
+  // Manage Existing Products filter & sort states
+  const [productSearch, setProductSearch] = useState("");
+  const [productSort, setProductSort] = useState<string>("default");
+  const [selectedFilterTags, setSelectedFilterTags] = useState<string[]>([]);
 
   // Product Form states
   const [newProduct, setNewProduct] = useState({
@@ -33,6 +39,7 @@ export default function AdminDashboard() {
     description: "",
     category: "",
     image: "",
+    isAvailable: true,
   });
   const [productImage, setProductImage] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -231,9 +238,10 @@ export default function AdminDashboard() {
       
       if (res.ok) {
         alert(`Product ${editingProductId ? 'updated' : 'added'} successfully!`);
-        setNewProduct({ name: "", price: "", description: "", category: "", image: "" } as any);
+        setNewProduct({ name: "", price: "", description: "", category: "", image: "", isAvailable: true } as any);
         setProductImage(null);
         setEditingProductId(null);
+        setConfirmDeleteProduct(false);
         fetchProducts();
       } else {
         alert("Error saving product");
@@ -248,15 +256,84 @@ export default function AdminDashboard() {
 
   const handleEditProductClick = (product: any) => {
     setEditingProductId(product.id);
+    setConfirmDeleteProduct(false);
     setNewProduct({
       name: product.name,
       price: product.price,
       description: product.description,
       category: product.category || "",
-      image: product.image
+      image: product.image,
+      isAvailable: product.isAvailable !== false,
     } as any);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  const handleToggleAvailability = async (product: any) => {
+    const nextAvailable = product.isAvailable === false ? true : false;
+    // Optimistically update UI
+    setProducts((prev) =>
+      prev.map((p) => (p.id === product.id ? { ...p, isAvailable: nextAvailable } : p))
+    );
+    if (editingProductId === product.id) {
+      setNewProduct((prev) => ({ ...prev, isAvailable: nextAvailable }));
+    }
+    try {
+      const res = await fetch("/api/products", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: product.id, isAvailable: nextAvailable }),
+      });
+      if (!res.ok) {
+        throw new Error("Failed to toggle availability");
+      }
+    } catch (error) {
+      console.error(error);
+      alert("Failed to update availability status.");
+      fetchProducts();
+    }
+  };
+
+  const toggleFilterTag = (tag: string) => {
+    setSelectedFilterTags((prev) =>
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+    );
+  };
+
+  const filteredAndSortedProducts = products
+    .filter((p) => {
+      // Search filter
+      if (productSearch.trim() !== "") {
+        const q = productSearch.toLowerCase();
+        const matchesName = p.name?.toLowerCase().includes(q);
+        const matchesDesc = p.description?.toLowerCase().includes(q);
+        if (!matchesName && !matchesDesc) return false;
+      }
+      // Tag filter
+      if (selectedFilterTags.length > 0) {
+        if (!p.category) return false;
+        const pTags = p.category.split(",");
+        if (!selectedFilterTags.some((tag) => pTags.includes(tag))) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      switch (productSort) {
+        case "name-asc":
+          return (a.name || "").localeCompare(b.name || "");
+        case "name-desc":
+          return (b.name || "").localeCompare(a.name || "");
+        case "price-asc":
+          return (Number(a.price) || 0) - (Number(b.price) || 0);
+        case "price-desc":
+          return (Number(b.price) || 0) - (Number(a.price) || 0);
+        case "available-first":
+          return (a.isAvailable !== false ? 0 : 1) - (b.isAvailable !== false ? 0 : 1);
+        case "unavailable-first":
+          return (a.isAvailable === false ? 0 : 1) - (b.isAvailable === false ? 0 : 1);
+        default:
+          return 0;
+      }
+    });
 
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -275,7 +352,10 @@ export default function AdminDashboard() {
   };
 
   const handleDeleteProduct = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this product?")) return;
+    if (!confirmDeleteProduct) {
+      alert("Please check the confirmation box before permanently deleting this item.");
+      return;
+    }
     
     try {
       const res = await fetch(`/api/products?id=${id}`, {
@@ -283,7 +363,11 @@ export default function AdminDashboard() {
       });
       
       if (res.ok) {
-        alert("Product deleted!");
+        alert("Product permanently deleted!");
+        setEditingProductId(null);
+        setConfirmDeleteProduct(false);
+        setNewProduct({ name: "", price: "", description: "", category: "", image: "", isAvailable: true } as any);
+        setProductImage(null);
         fetchProducts();
       } else {
         alert("Failed to delete product.");
@@ -449,7 +533,8 @@ export default function AdminDashboard() {
                 {editingProductId && (
                   <button onClick={() => {
                     setEditingProductId(null);
-                    setNewProduct({ name: "", price: "", description: "", category: "", image: "" } as any);
+                    setConfirmDeleteProduct(false);
+                    setNewProduct({ name: "", price: "", description: "", category: "", image: "", isAvailable: true } as any);
                     setProductImage(null);
                   }} className="text-sm text-red-400 hover:underline">
                     Cancel Edit
@@ -502,7 +587,7 @@ export default function AdminDashboard() {
                     })}
                   </div>
                 </div>
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-3">
                   <input
                     type="file"
                     accept="image/*"
@@ -511,6 +596,20 @@ export default function AdminDashboard() {
                     required={!editingProductId}
                   />
                   {editingProductId && <p className="text-xs text-gray-400">Leave file empty to keep current image.</p>}
+                  <div className="flex items-center justify-between bg-gray-900 border border-gray-700 rounded-lg px-4 py-2">
+                    <span className="text-sm text-gray-300 font-medium">Public Shop Availability:</span>
+                    <button
+                      type="button"
+                      onClick={() => setNewProduct({ ...newProduct, isAvailable: !newProduct.isAvailable })}
+                      className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${
+                        newProduct.isAvailable
+                          ? "bg-green-500/20 text-green-400 border border-green-500/50"
+                          : "bg-red-500/20 text-red-400 border border-red-500/50"
+                      }`}
+                    >
+                      {newProduct.isAvailable ? "● Available" : "○ Unavailable"}
+                    </button>
+                  </div>
                 </div>
                 <textarea
                   placeholder="Product Description"
@@ -528,63 +627,235 @@ export default function AdminDashboard() {
                   {isSubmitting ? 'Saving...' : (editingProductId ? 'Update Product' : 'Save Product')}
                 </button>
               </form>
+
+              {editingProductId && (
+                <div className="mt-6 pt-5 border-t border-gray-700 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-red-950/20 p-4 rounded-xl border border-red-900/40">
+                  <label className="flex items-center space-x-3 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={confirmDeleteProduct}
+                      onChange={(e) => setConfirmDeleteProduct(e.target.checked)}
+                      className="w-4 h-4 text-red-600 bg-gray-900 border-gray-600 rounded focus:ring-red-500"
+                    />
+                    <span className="text-sm text-red-300 font-medium">
+                      Confirm permanent deletion of this item
+                    </span>
+                  </label>
+                  <button
+                    type="button"
+                    disabled={!confirmDeleteProduct}
+                    onClick={() => handleDeleteProduct(editingProductId)}
+                    className={`flex items-center justify-center space-x-2 px-5 py-2.5 rounded-lg font-semibold text-sm transition-colors ${
+                      confirmDeleteProduct
+                        ? "bg-red-600 hover:bg-red-700 text-white cursor-pointer"
+                        : "bg-gray-700 text-gray-500 cursor-not-allowed opacity-60"
+                    }`}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Delete Product</span>
+                  </button>
+                </div>
+              )}
             </div>
 
-            <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 overflow-x-auto">
-              <h2 className="text-xl font-bold text-white mb-4">Manage Existing Products</h2>
-              <table className="w-full text-left text-gray-400">
-                <thead className="text-xs text-gray-400 uppercase bg-gray-900">
-                  <tr>
-                    <th className="px-4 py-3 rounded-tl-lg">Image</th>
-                    <th className="px-4 py-3">Name</th>
-                    <th className="px-4 py-3">Category</th>
-                    <th className="px-4 py-3">Price</th>
-                    <th className="px-4 py-3 rounded-tr-lg">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {products.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="px-4 py-8 text-center">No products found. Add one above!</td>
-                    </tr>
-                  ) : (
-                    products.map((p) => (
-                      <tr key={p.id} className="border-b border-gray-700 hover:bg-gray-800/50 transition-colors">
-                        <td className="px-4 py-3">
-                          <img src={p.image} alt={p.name} className="w-12 h-12 object-cover rounded bg-gray-900 border border-gray-700" />
-                        </td>
-                        <td className="px-4 py-3 font-medium text-white">{p.name}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex flex-wrap gap-1">
-                            {p.category ? p.category.split(',').map((tag: string, i: number) => (
-                              <span key={i} className="bg-gray-900 px-2 py-1 rounded text-xs border border-gray-700 text-gray-300">
-                                {tag}
-                              </span>
-                            )) : <span className="text-gray-500 text-xs">No tags</span>}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-purple-400 font-medium">₱{p.price}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => handleEditProductClick(p)}
-                              className="text-blue-400 hover:text-blue-300 hover:bg-blue-400/10 px-3 py-1.5 rounded transition-colors"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => handleDeleteProduct(p.id)}
-                              className="text-red-400 hover:text-red-300 hover:bg-red-400/10 px-3 py-1.5 rounded transition-colors"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
+            <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-bold text-white">Manage Existing Products</h2>
+                  <p className="text-sm text-gray-400">
+                    Showing {filteredAndSortedProducts.length} of {products.length} items
+                  </p>
+                </div>
+
+                {/* Search & Sort Controls */}
+                <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+                  <div className="relative flex-1 sm:w-64">
+                    <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      placeholder="Search items..."
+                      value={productSearch}
+                      onChange={(e) => setProductSearch(e.target.value)}
+                      className="w-full bg-gray-900 border border-gray-700 rounded-lg pl-9 pr-4 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+
+                  <div className="relative flex items-center">
+                    <ArrowUpDown className="w-4 h-4 text-gray-400 absolute left-3 pointer-events-none" />
+                    <select
+                      value={productSort}
+                      onChange={(e) => setProductSort(e.target.value)}
+                      className="w-full sm:w-auto bg-gray-900 border border-gray-700 rounded-lg pl-9 pr-8 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer"
+                    >
+                      <option value="default">Sort: Default</option>
+                      <option value="name-asc">Name: A to Z</option>
+                      <option value="name-desc">Name: Z to A</option>
+                      <option value="price-asc">Price: Low to High</option>
+                      <option value="price-desc">Price: High to Low</option>
+                      <option value="available-first">Status: Available First</option>
+                      <option value="unavailable-first">Status: Unavailable First</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tag Filter Pills */}
+              {categories.length > 0 && (
+                <div className="pt-2 border-t border-gray-700/60">
+                  <div className="flex items-center gap-2 mb-2.5 text-gray-300 text-sm">
+                    <Filter className="w-4 h-4 text-purple-400" />
+                    <span className="font-medium">Filter by Tags:</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {categories.map((c) => {
+                      const isSelected = selectedFilterTags.includes(c.name);
+                      return (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => toggleFilterTag(c.name)}
+                          className={`px-3.5 py-1 rounded-full text-xs font-medium transition-all duration-200 border ${
+                            isSelected
+                              ? "bg-purple-600 text-white border-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.4)]"
+                              : "bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-700 hover:text-white"
+                          }`}
+                        >
+                          {c.name}
+                        </button>
+                      );
+                    })}
+                    {selectedFilterTags.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedFilterTags([])}
+                        className="px-3 py-1 text-xs font-medium text-red-400 hover:text-red-300 hover:underline"
+                      >
+                        Clear tags
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Grid View of Products */}
+              {filteredAndSortedProducts.length === 0 ? (
+                <div className="text-center text-gray-400 py-14 bg-gray-900/40 rounded-xl border border-gray-700/50">
+                  <p className="text-lg">
+                    {products.length === 0
+                      ? "No products found. Add one above!"
+                      : "No products match your search or selected tags."}
+                  </p>
+                  {(productSearch || selectedFilterTags.length > 0) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProductSearch("");
+                        setSelectedFilterTags([]);
+                      }}
+                      className="mt-3 text-sm text-purple-400 hover:underline"
+                    >
+                      Reset search & filters
+                    </button>
                   )}
-                </tbody>
-              </table>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                  {filteredAndSortedProducts.map((p) => {
+                    const isAvailable = p.isAvailable !== false;
+                    const isEditingThis = editingProductId === p.id;
+                    return (
+                      <div
+                        key={p.id}
+                        className={`bg-gray-900 rounded-xl overflow-hidden shadow-lg border flex flex-col h-full transition-all ${
+                          isEditingThis
+                            ? "border-purple-500 ring-2 ring-purple-500/40"
+                            : isAvailable
+                            ? "border-gray-700"
+                            : "border-gray-800 opacity-80"
+                        }`}
+                      >
+                        <div className="h-44 w-full bg-gray-800 relative flex items-center justify-center overflow-hidden">
+                          {p.image ? (
+                            <img
+                              src={p.image}
+                              alt={p.name}
+                              className={`w-full h-full object-cover ${!isAvailable ? "opacity-50 grayscale-[40%]" : ""}`}
+                            />
+                          ) : (
+                            <div className="text-gray-500 text-sm">No Image</div>
+                          )}
+                          <span
+                            className={`absolute top-2 left-2 text-xs font-bold px-2.5 py-1 rounded-full shadow ${
+                              isAvailable
+                                ? "bg-green-600/90 text-white"
+                                : "bg-red-600/90 text-white"
+                            }`}
+                          >
+                            {isAvailable ? "Available" : "Unavailable"}
+                          </span>
+                        </div>
+
+                        <div className="p-4 flex flex-col flex-grow">
+                          <div className="flex justify-between items-start gap-2 mb-1.5">
+                            <h3 className="text-base font-semibold text-white line-clamp-1">{p.name}</h3>
+                            <span className="text-purple-400 font-bold shrink-0">₱{p.price}</span>
+                          </div>
+
+                          <p className="text-gray-400 text-xs mb-3 line-clamp-2 flex-grow">
+                            {p.description}
+                          </p>
+
+                          <div className="flex flex-wrap gap-1 mb-4">
+                            {p.category ? (
+                              p.category.split(",").map((tag: string, i: number) => (
+                                <span
+                                  key={i}
+                                  className="bg-gray-800 px-2 py-0.5 rounded text-[11px] border border-gray-700 text-gray-300"
+                                >
+                                  {tag}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-gray-500 text-[11px]">No tags</span>
+                            )}
+                          </div>
+
+                          {/* Availability Toggle + Edit Button */}
+                          <div className="pt-3 border-t border-gray-800 flex items-center justify-between gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleAvailability(p)}
+                              className="flex items-center space-x-2 text-xs font-medium text-gray-300 hover:text-white transition-colors"
+                              title="Toggle availability in public shop"
+                            >
+                              <div
+                                className={`w-9 h-5 flex items-center rounded-full p-0.5 transition-colors ${
+                                  isAvailable ? "bg-green-600" : "bg-gray-700"
+                                }`}
+                              >
+                                <div
+                                  className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                                    isAvailable ? "translate-x-4" : "translate-x-0"
+                                  }`}
+                                />
+                              </div>
+                              <span>{isAvailable ? "Available" : "Unavailable"}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleEditProductClick(p)}
+                              className="bg-purple-600/20 hover:bg-purple-600 text-purple-300 hover:text-white border border-purple-500/40 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
+                            >
+                              {isEditingThis ? "Editing..." : "Edit"}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         )}

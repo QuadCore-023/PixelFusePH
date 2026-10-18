@@ -50,9 +50,34 @@ export async function POST(request: Request) {
     const proofOfPayment = body.proofOfPayment || null;
     
     // Explicitly stringify the items payload for SQLite
+    let itemsList: any[] = [];
     let itemsString = '[]';
     if (body.items) {
-      itemsString = typeof body.items === 'string' ? body.items : JSON.stringify(body.items);
+      if (typeof body.items === 'string') {
+        itemsString = body.items;
+        try { itemsList = JSON.parse(body.items); } catch {}
+      } else if (Array.isArray(body.items)) {
+        itemsList = body.items;
+        itemsString = JSON.stringify(body.items);
+      }
+    }
+
+    // Verify none of the ordered database products are marked unavailable
+    const productIds = itemsList
+      .map((item: any) => item.id)
+      .filter((id: any) => typeof id === 'string' && !id.startsWith('custom-'));
+
+    if (productIds.length > 0) {
+      const dbProducts = await prisma.product.findMany({
+        where: { id: { in: productIds } },
+      });
+      const unavailableItem = dbProducts.find((p) => p.isAvailable === false);
+      if (unavailableItem) {
+        return NextResponse.json(
+          { error: `"${unavailableItem.name}" is currently unavailable and cannot be ordered.` },
+          { status: 400 }
+        );
+      }
     }
 
     const order = await prisma.order.create({

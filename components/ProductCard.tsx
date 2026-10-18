@@ -16,10 +16,12 @@ export default function ProductCard({ product }: ProductCardProps) {
   const [showModal, setShowModal] = useState(false);
   const [quantity, setQuantity] = useState(1);
 
+  const isAvailable = product.isAvailable !== false;
   const cartItem = cartItems.find(item => item.id === product.id);
   const quantityInCart = cartItem ? cartItem.quantity : 0;
 
   const handleAddToCart = () => {
+    if (!isAvailable) return;
     // Add multiple items based on quantity
     for (let i = 0; i < quantity; i++) {
       addItem(product);
@@ -34,12 +36,17 @@ export default function ProductCard({ product }: ProductCardProps) {
 
   return (
     <>
-      <div className="bg-gray-800 rounded-xl overflow-hidden shadow-lg transition-transform hover:scale-[1.02] border border-gray-700 flex flex-col h-full relative">
+      <div className={`bg-gray-800 rounded-xl overflow-hidden shadow-lg transition-transform hover:scale-[1.02] border flex flex-col h-full relative ${isAvailable ? 'border-gray-700' : 'border-gray-700/60 opacity-85'}`}>
         <div className="h-48 w-full bg-gray-700 relative flex items-center justify-center p-0 overflow-hidden">
           {product.image ? (
-            <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+            <img src={product.image} alt={product.name} className={`w-full h-full object-cover ${!isAvailable ? 'opacity-50 grayscale-[40%]' : ''}`} />
           ) : (
             <div className="text-gray-400 text-sm">Image: {product.name}</div>
+          )}
+          {!isAvailable && (
+            <div className="absolute top-2 left-2 bg-red-600/90 text-white text-xs font-bold px-2.5 py-1 rounded-full shadow">
+              Unavailable
+            </div>
           )}
           {quantityInCart > 0 && (
             <div className="absolute top-2 right-2 bg-purple-600 text-white text-xs font-bold px-2 py-1 rounded-full shadow">
@@ -55,9 +62,13 @@ export default function ProductCard({ product }: ProductCardProps) {
           <p className="text-gray-400 text-sm flex-grow mb-4 line-clamp-2">{product.description}</p>
           <button
             onClick={() => setShowModal(true)}
-            className="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 px-4 rounded-lg flex items-center justify-center transition-colors"
+            className={`w-full font-medium py-2 px-4 rounded-lg flex items-center justify-center transition-colors ${
+              isAvailable
+                ? 'bg-purple-600 hover:bg-purple-700 text-white'
+                : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+            }`}
           >
-            View
+            {isAvailable ? 'View' : 'Unavailable (View Info)'}
           </button>
         </div>
       </div>
@@ -82,7 +93,12 @@ export default function ProductCard({ product }: ProductCardProps) {
             
             <div className="h-64 md:h-auto md:w-1/2 bg-gray-900 relative shrink-0">
               {product.image && (
-                <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+                <img src={product.image} alt={product.name} className={`w-full h-full object-cover ${!isAvailable ? 'opacity-60 grayscale-[30%]' : ''}`} />
+              )}
+              {!isAvailable && (
+                <div className="absolute top-3 left-3 bg-red-600 text-white text-xs font-bold px-3 py-1 rounded-full shadow">
+                  Currently Unavailable
+                </div>
               )}
             </div>
             
@@ -94,37 +110,43 @@ export default function ProductCard({ product }: ProductCardProps) {
               
               <p className="text-gray-300 mb-6 flex-grow">{product.description}</p>
               
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between mt-6 bg-gray-900/50 p-4 rounded-xl border border-gray-700 gap-4">
-                <div className="flex items-center justify-center space-x-3 shrink-0">
-                  <button 
-                    onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                    className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-white hover:bg-gray-600 transition-colors"
+              {isAvailable ? (
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between mt-6 bg-gray-900/50 p-4 rounded-xl border border-gray-700 gap-4">
+                  <div className="flex items-center justify-center space-x-3 shrink-0">
+                    <button 
+                      onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                      className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-white hover:bg-gray-600 transition-colors"
+                    >
+                      -
+                    </button>
+                    <input
+                      type="number"
+                      min="1"
+                      value={quantity}
+                      onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="w-16 bg-gray-800 text-white text-center font-bold text-lg rounded-lg border border-gray-600 focus:outline-none focus:border-purple-500 py-1 no-spinners"
+                    />
+                    <button 
+                      onClick={() => setQuantity(quantity + 1)}
+                      className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center text-white hover:bg-purple-500 transition-colors"
+                    >
+                      +
+                    </button>
+                  </div>
+                  
+                  <button
+                    onClick={handleAddToCart}
+                    className="bg-purple-600 hover:bg-purple-700 text-white font-medium py-3 px-6 rounded-lg flex items-center justify-center transition-colors flex-1"
                   >
-                    -
-                  </button>
-                  <input
-                    type="number"
-                    min="1"
-                    value={quantity}
-                    onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
-                    className="w-16 bg-gray-800 text-white text-center font-bold text-lg rounded-lg border border-gray-600 focus:outline-none focus:border-purple-500 py-1 no-spinners"
-                  />
-                  <button 
-                    onClick={() => setQuantity(quantity + 1)}
-                    className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center text-white hover:bg-purple-500 transition-colors"
-                  >
-                    +
+                    <ShoppingCart className="w-5 h-5 mr-2" />
+                    Add (₱{product.price * quantity})
                   </button>
                 </div>
-                
-                <button
-                  onClick={handleAddToCart}
-                  className="bg-purple-600 hover:bg-purple-700 text-white font-medium py-3 px-6 rounded-lg flex items-center justify-center transition-colors flex-1"
-                >
-                  <ShoppingCart className="w-5 h-5 mr-2" />
-                  Add (₱{product.price * quantity})
-                </button>
-              </div>
+              ) : (
+                <div className="mt-6 bg-red-950/30 border border-red-800/50 p-4 rounded-xl text-center">
+                  <p className="text-red-400 font-semibold">This item is currently unavailable and cannot be ordered.</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
