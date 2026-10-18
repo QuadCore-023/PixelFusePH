@@ -12,10 +12,12 @@ model Product {
   id          String   @id @default(cuid())
   name        String
   price       Float
+  salePrice   Float?
   description String
   image       String
   category    String
   isAvailable Boolean  @default(true)
+  ribbons     String   @default("")
 }
 
 model Category {

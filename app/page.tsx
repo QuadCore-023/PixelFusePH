@@ -26,7 +26,22 @@ export default function Home() {
     fetchProducts();
   }, []);
 
-  const featuredProducts = products.slice(0, 3);
+  const featuredProducts = [...products]
+    .sort((a, b) => {
+      const getScore = (p: any) => {
+        const manual = (p.ribbons || '').split(',').map((r: string) => r.trim());
+        const auto = Array.isArray(p.autoRibbons) ? p.autoRibbons : [];
+        const all = new Set([...manual, ...auto]);
+        let score = 0;
+        if (p.isAvailable === false) score -= 100;
+        if (all.has('Highlight')) score += 10;
+        if (all.has('Best Seller')) score += 5;
+        if (all.has('Popular')) score += 3;
+        return score;
+      };
+      return getScore(b) - getScore(a);
+    })
+    .slice(0, 3);
 
   return (
     <div className="flex flex-col">

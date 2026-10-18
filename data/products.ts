@@ -2,10 +2,15 @@ export interface Product {
   id: string;
   name: string;
   price: number;
+  salePrice?: number | null;
   image: string;
   description: string;
   category?: string;
   isAvailable?: boolean;
+  ribbons?: string;
+  autoRibbons?: string[];
+  soldCount?: number;
+  recentSoldCount?: number;
 }
 
 export const products: Product[] = [

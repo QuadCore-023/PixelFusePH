@@ -20,11 +20,49 @@ export default function ProductCard({ product }: ProductCardProps) {
   const cartItem = cartItems.find(item => item.id === product.id);
   const quantityInCart = cartItem ? cartItem.quantity : 0;
 
+  const manualRibbons = product.ribbons
+    ? product.ribbons.split(',').map((r) => r.trim()).filter(Boolean)
+    : [];
+  const autoRibbons = Array.isArray(product.autoRibbons) ? product.autoRibbons : [];
+  const hasSalePrice =
+    typeof product.salePrice === 'number' &&
+    product.salePrice > 0 &&
+    product.salePrice < product.price;
+
+  const allRibbons = Array.from(
+    new Set([
+      ...autoRibbons,
+      ...manualRibbons,
+      ...(hasSalePrice ? ['Sale'] : []),
+    ])
+  );
+
+  const isHighlighted = allRibbons.includes('Highlight');
+  const effectivePrice = hasSalePrice ? (product.salePrice as number) : product.price;
+
+  const getRibbonStyle = (ribbon: string) => {
+    switch (ribbon) {
+      case 'Best Seller':
+        return { label: '🏆 Best Seller', classes: 'bg-gradient-to-r from-amber-500 to-yellow-500 text-gray-950' };
+      case 'Popular':
+        return { label: '🔥 Popular', classes: 'bg-gradient-to-r from-orange-500 to-red-500 text-white' };
+      case 'Highlight':
+        return { label: '✨ Highlight', classes: 'bg-gradient-to-r from-purple-500 to-indigo-500 text-white' };
+      case 'Sale':
+        return { label: '🏷️ Sale', classes: 'bg-gradient-to-r from-emerald-500 to-green-600 text-white' };
+      case 'Limited':
+        return { label: '⏳ Limited', classes: 'bg-gradient-to-r from-rose-500 to-pink-600 text-white' };
+      default:
+        return { label: ribbon, classes: 'bg-purple-600 text-white' };
+    }
+  };
+
   const handleAddToCart = () => {
     if (!isAvailable) return;
+    const itemToAdd = { ...product, price: effectivePrice };
     // Add multiple items based on quantity
     for (let i = 0; i < quantity; i++) {
-      addItem(product);
+      addItem(itemToAdd);
     }
     setShowToast(true);
     setTimeout(() => {
@@ -36,28 +74,62 @@ export default function ProductCard({ product }: ProductCardProps) {
 
   return (
     <>
-      <div className={`bg-gray-800 rounded-xl overflow-hidden shadow-lg transition-transform hover:scale-[1.02] border flex flex-col h-full relative ${isAvailable ? 'border-gray-700' : 'border-gray-700/60 opacity-85'}`}>
+      <div
+        className={`bg-gray-800 rounded-xl overflow-hidden shadow-lg transition-transform hover:scale-[1.02] border flex flex-col h-full relative ${
+          !isAvailable
+            ? 'border-gray-700/60 opacity-85'
+            : isHighlighted
+            ? 'border-purple-500 ring-1 ring-purple-500/50 shadow-purple-500/10'
+            : 'border-gray-700'
+        }`}
+      >
         <div className="h-48 w-full bg-gray-700 relative flex items-center justify-center p-0 overflow-hidden">
           {product.image ? (
             <img src={product.image} alt={product.name} className={`w-full h-full object-cover ${!isAvailable ? 'opacity-50 grayscale-[40%]' : ''}`} />
           ) : (
             <div className="text-gray-400 text-sm">Image: {product.name}</div>
           )}
-          {!isAvailable && (
-            <div className="absolute top-2 left-2 bg-red-600/90 text-white text-xs font-bold px-2.5 py-1 rounded-full shadow">
-              Unavailable
-            </div>
-          )}
+
+          {/* Ribbons / Status Badges */}
+          <div className="absolute top-2 left-2 flex flex-col items-start gap-1.5 z-10 max-w-[75%]">
+            {!isAvailable ? (
+              <div className="bg-red-600/95 text-white text-xs font-bold px-2.5 py-1 rounded-full shadow">
+                Unavailable
+              </div>
+            ) : (
+              allRibbons.map((ribbon) => {
+                const style = getRibbonStyle(ribbon);
+                return (
+                  <span
+                    key={ribbon}
+                    className={`${style.classes} text-[11px] font-extrabold px-2.5 py-0.5 rounded-full shadow-md tracking-wide`}
+                  >
+                    {style.label}
+                  </span>
+                );
+              })
+            )}
+          </div>
+
           {quantityInCart > 0 && (
-            <div className="absolute top-2 right-2 bg-purple-600 text-white text-xs font-bold px-2 py-1 rounded-full shadow">
+            <div className="absolute top-2 right-2 bg-purple-600 text-white text-xs font-bold px-2 py-1 rounded-full shadow z-10">
               {quantityInCart} in cart
             </div>
           )}
         </div>
         <div className="p-5 flex flex-col flex-grow">
-          <div className="flex justify-between items-start mb-2">
+          <div className="flex justify-between items-start gap-2 mb-2">
             <h3 className="text-lg font-semibold text-white">{product.name}</h3>
-            <span className="text-purple-400 font-bold">₱{product.price}</span>
+            <div className="text-right shrink-0">
+              {hasSalePrice ? (
+                <div className="flex flex-col items-end">
+                  <span className="text-xs text-gray-500 line-through">₱{product.price}</span>
+                  <span className="text-emerald-400 font-extrabold">₱{effectivePrice}</span>
+                </div>
+              ) : (
+                <span className="text-purple-400 font-bold">₱{product.price}</span>
+              )}
+            </div>
           </div>
           <p className="text-gray-400 text-sm flex-grow mb-4 line-clamp-2">{product.description}</p>
           <button
@@ -95,17 +167,40 @@ export default function ProductCard({ product }: ProductCardProps) {
               {product.image && (
                 <img src={product.image} alt={product.name} className={`w-full h-full object-cover ${!isAvailable ? 'opacity-60 grayscale-[30%]' : ''}`} />
               )}
-              {!isAvailable && (
-                <div className="absolute top-3 left-3 bg-red-600 text-white text-xs font-bold px-3 py-1 rounded-full shadow">
-                  Currently Unavailable
-                </div>
-              )}
+              <div className="absolute top-3 left-3 flex flex-wrap gap-1.5 z-10">
+                {!isAvailable ? (
+                  <div className="bg-red-600 text-white text-xs font-bold px-3 py-1 rounded-full shadow">
+                    Currently Unavailable
+                  </div>
+                ) : (
+                  allRibbons.map((ribbon) => {
+                    const style = getRibbonStyle(ribbon);
+                    return (
+                      <span
+                        key={ribbon}
+                        className={`${style.classes} text-xs font-extrabold px-3 py-1 rounded-full shadow-md`}
+                      >
+                        {style.label}
+                      </span>
+                    );
+                  })
+                )}
+              </div>
             </div>
             
             <div className="p-6 md:w-1/2 flex flex-col">
               <div className="flex justify-between items-start mb-4">
                 <h2 className="text-2xl font-bold text-white">{product.name}</h2>
-                <span className="text-xl text-purple-400 font-bold ml-4 shrink-0">₱{product.price}</span>
+                <div className="text-right ml-4 shrink-0">
+                  {hasSalePrice ? (
+                    <div className="flex flex-col items-end">
+                      <span className="text-sm text-gray-500 line-through">₱{product.price}</span>
+                      <span className="text-xl text-emerald-400 font-extrabold">₱{effectivePrice}</span>
+                    </div>
+                  ) : (
+                    <span className="text-xl text-purple-400 font-bold">₱{product.price}</span>
+                  )}
+                </div>
               </div>
               
               <p className="text-gray-300 mb-6 flex-grow">{product.description}</p>
@@ -139,7 +234,7 @@ export default function ProductCard({ product }: ProductCardProps) {
                     className="bg-purple-600 hover:bg-purple-700 text-white font-medium py-3 px-6 rounded-lg flex items-center justify-center transition-colors flex-1"
                   >
                     <ShoppingCart className="w-5 h-5 mr-2" />
-                    Add (₱{product.price * quantity})
+                    Add (₱{effectivePrice * quantity})
                   </button>
                 </div>
               ) : (
