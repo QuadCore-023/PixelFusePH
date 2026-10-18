@@ -17,7 +17,14 @@ import {
   Eye,
   X,
   ThumbsUp,
+  AlertTriangle,
+  Phone,
+  ExternalLink,
+  MessageCircle,
 } from "lucide-react";
+
+const OFFICIAL_PHONE = "09927367858";
+const DEFAULT_FB_URL = "https://web.facebook.com/profile.php?id=61590007025954";
 
 const ORDER_STEPS = [
   { key: "Pending", label: "Order Placed", desc: "Awaiting confirmation", icon: Clock },
@@ -34,6 +41,7 @@ export default function OrderHistory() {
   const [statusFilter, setStatusFilter] = useState<string>("All");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [previewModal, setPreviewModal] = useState<{ url: string; title: string } | null>(null);
+  const [facebookUrl, setFacebookUrl] = useState<string>(DEFAULT_FB_URL);
 
   const performSearch = async (searchValue: string) => {
     const trimmed = searchValue.trim();
@@ -72,6 +80,13 @@ export default function OrderHistory() {
         // ignore invalid preset
       }
     }
+
+    fetch("/api/settings")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.facebookUrl) setFacebookUrl(data.facebookUrl);
+      })
+      .catch(() => {});
   }, []);
 
   const handleSearch = async (e: React.FormEvent) => {
@@ -121,6 +136,59 @@ export default function OrderHistory() {
         <p className="text-gray-400 text-lg">
           Enter your email address, phone number, or Order ID to view real-time status updates.
         </p>
+      </div>
+
+      {/* Important Reminder & Contact Info Banner */}
+      <div className="bg-gray-800/90 border border-amber-500/40 rounded-2xl p-5 sm:p-6 mb-8 shadow-lg">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-amber-400 font-extrabold text-sm uppercase tracking-wider">
+              <AlertTriangle className="w-5 h-5 shrink-0" />
+              <span>Important Order &amp; Receiving Reminder</span>
+            </div>
+            <p className="text-gray-200 text-sm leading-relaxed">
+              Please be <strong className="text-white">active and prepared</strong> on the scheduled day and time of receiving your order. Expect a message from our{" "}
+              <a
+                href={facebookUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-400 hover:underline font-semibold"
+              >
+                Official Facebook Page
+              </a>{" "}
+              or a <strong className="text-white">text message / call</strong> from our contact number{" "}
+              <a href={`tel:${OFFICIAL_PHONE}`} className="text-green-400 hover:underline font-semibold">
+                {OFFICIAL_PHONE}
+              </a>
+              .
+            </p>
+            <p className="text-gray-300 text-xs sm:text-sm flex items-center gap-1.5 pt-0.5">
+              <MessageCircle className="w-4 h-4 text-blue-400 shrink-0" />
+              <span>
+                <strong className="text-white">Need any changes to your order?</strong> Please message our Facebook Page directly so we can assist you right away.
+              </span>
+            </p>
+          </div>
+
+          <div className="flex flex-wrap sm:flex-nowrap md:flex-col gap-2.5 shrink-0">
+            <a
+              href={`tel:${OFFICIAL_PHONE}`}
+              className="inline-flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-950 border border-gray-700 hover:border-green-500/50 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold text-white transition-colors"
+            >
+              <Phone className="w-4 h-4 text-green-400 shrink-0" />
+              <span>{OFFICIAL_PHONE}</span>
+            </a>
+            <a
+              href={facebookUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-2 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold text-blue-300 transition-colors"
+            >
+              <ExternalLink className="w-4 h-4 text-blue-400 shrink-0" />
+              <span>Facebook Page</span>
+            </a>
+          </div>
+        </div>
       </div>
 
       {/* Search Card */}

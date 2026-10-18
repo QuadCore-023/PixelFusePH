@@ -16,14 +16,22 @@ export default function UserPreset() {
     facebookUrl: '',
     address: '',
     city: 'meetup',
-    paymentMethod: 'meetup',
+    paymentMethod: 'cash',
   });
 
   useEffect(() => {
     const savedInfo = localStorage.getItem('userPreset');
     if (savedInfo) {
       try {
-        setFormData((prev) => ({ ...prev, ...JSON.parse(savedInfo) }));
+        const parsed = JSON.parse(savedInfo);
+        const validPayment = ['cash', 'gcash', 'maya'].includes(parsed.paymentMethod)
+          ? parsed.paymentMethod
+          : 'cash';
+        setFormData((prev) => ({
+          ...prev,
+          ...parsed,
+          paymentMethod: validPayment,
+        }));
       } catch (e) {
         console.error("Failed to parse user preset");
       }
@@ -53,7 +61,7 @@ export default function UserPreset() {
       </div>
       
       <p className="text-gray-400 mb-8">
-        Set up your default details here so you don't have to fill them out every time you check out.
+        Set up your default details here so you don&apos;t have to fill them out every time you check out. All fields are required.
       </p>
 
       <form onSubmit={handleSubmit} className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-lg">
@@ -89,7 +97,7 @@ export default function UserPreset() {
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label htmlFor="facebookName" className="block text-sm font-medium text-gray-400 mb-1">Facebook Name</label>
+              <label htmlFor="facebookName" className="block text-sm font-medium text-gray-400 mb-1">Facebook Name *</label>
               <input
                 type="text"
                 id="facebookName"
@@ -98,10 +106,11 @@ export default function UserPreset() {
                 onChange={handleChange}
                 className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
                 placeholder="Juan Dela Cruz"
+                required
               />
             </div>
             <div>
-              <label htmlFor="facebookUrl" className="block text-sm font-medium text-gray-400 mb-1">Facebook Profile Link</label>
+              <label htmlFor="facebookUrl" className="block text-sm font-medium text-gray-400 mb-1">Facebook Profile Link *</label>
               <input
                 type="url"
                 id="facebookUrl"
@@ -110,13 +119,14 @@ export default function UserPreset() {
                 onChange={handleChange}
                 className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
                 placeholder="https://facebook.com/..."
+                required
               />
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label htmlFor="phone" className="block text-sm font-medium text-gray-400 mb-1">Phone Number</label>
+              <label htmlFor="phone" className="block text-sm font-medium text-gray-400 mb-1">Phone Number *</label>
               <input
                 type="tel"
                 id="phone"
@@ -125,20 +135,37 @@ export default function UserPreset() {
                 onChange={handleChange}
                 className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
                 placeholder="09123456789"
+                required
               />
             </div>
             <div>
-              <label htmlFor="city" className="block text-sm font-medium text-gray-400 mb-1">Default Delivery Option</label>
+              <label htmlFor="city" className="block text-sm font-medium text-gray-400 mb-1">Default Delivery Option *</label>
               <select
                 id="city"
                 name="city"
                 value={formData.city}
                 onChange={handleChange}
+                required
                 className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
               >
                 <option value="meetup">Campus Meetup (₱0)</option>
                 <option value="taguig">Taguig Delivery (₱50)</option>
                 <option value="makati">Makati Delivery (₱70)</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="paymentMethod" className="block text-sm font-medium text-gray-400 mb-1">Default Payment Method *</label>
+              <select
+                id="paymentMethod"
+                name="paymentMethod"
+                value={formData.paymentMethod}
+                onChange={handleChange}
+                required
+                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+              >
+                <option value="cash">Cash (Upon Meetup / Delivery)</option>
+                <option value="gcash">GCash</option>
+                <option value="maya">Maya</option>
               </select>
             </div>
           </div>
